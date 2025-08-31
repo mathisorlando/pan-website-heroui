@@ -53,21 +53,60 @@ export function BeamsBackground({ className, intensity = "subtle", children }: B
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const MIN_BEAMS = 16;
+    // Browser feature detection and tuning
+    const ua = navigator.userAgent;
+    const isFirefox = /firefox/i.test(ua);
+    const isSafari = /^((?!chrome|android).)*safari/i.test(ua);
+    const supportsCanvasFilter = typeof (ctx as any).filter !== "undefined";
+    const prefersReducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const isChromeLike = /chrome|crios|chromium/i.test(ua) && !/edg/i.test(ua) && !isSafari;
+    const HEAVY_MODE = isFirefox || isChromeLike || prefersReducedMotion; // static rendering for Firefox & Chrome
+    // For Firefox, disable blur entirely to avoid heavy GPU cost
+    const BASE_BLUR_PX = supportsCanvasFilter ? (isSafari ? 24 : isFirefox ? 0 : 12) : 0;
+    let currentBlurPx = BASE_BLUR_PX;
+    // Lower beam density on Firefox
+    const MIN_BEAMS = isSafari ? 16 : isFirefox ? 6 : 10;
+    const WIDTH_DIVISOR = isSafari ? 120 : isFirefox ? 200 : 150;
     const opacityMap: Record<Intensity, number> = { subtle: 0.6, medium: 0.8, strong: 1 };
+    // Throttle target FPS on non-Safari to reduce load
+    const TARGET_FPS = isSafari ? 60 : (isFirefox ? 24 : 30);
+    const FRAME_INTERVAL = 1000 / TARGET_FPS;
+    let lastFrameTime = 0;
+    // Adaptive performance sampling
+    let perfLevel: 2 | 1 | 0 = 2; // 2=full, 1=reduced, 0=minimal
+    let accumTime = 0;
+    let frameCounter = 0;
 
-    const updateCanvasSize = () => {
+    // Debounce resize to avoid ResizeObserver loop and excessive work
+    let resizeRaf = 0;
+    const doResize = () => {
       const rect = container.getBoundingClientRect();
-      const dpr = window.devicePixelRatio || 1;
-      canvas.width = Math.max(1, Math.floor(rect.width * dpr));
-      canvas.height = Math.max(1, Math.floor(rect.height * dpr));
+      const sysDpr = window.devicePixelRatio || 1;
+      const effectiveDpr = isFirefox ? 1 : sysDpr; // cap DPR on Firefox for perf
+      canvas.width = Math.max(1, Math.floor(rect.width * effectiveDpr));
+      canvas.height = Math.max(1, Math.floor(rect.height * effectiveDpr));
       canvas.style.width = `${rect.width}px`;
       canvas.style.height = `${rect.height}px`;
       ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.scale(dpr, dpr);
+      ctx.scale(effectiveDpr, effectiveDpr);
 
-      const total = Math.max(MIN_BEAMS, Math.floor(rect.width / 120));
-      beamsRef.current = Array.from({ length: total }, () => createBeam(rect.width, rect.height));
+      const total = Math.max(MIN_BEAMS, Math.floor(rect.width / WIDTH_DIVISOR));
+      const newBeams = Array.from({ length: total }, () => createBeam(rect.width, rect.height));
+      beamsRef.current = newBeams;
+      if (HEAVY_MODE) {
+        // Draw a static frame only
+        ctx.clearRect(0, 0, rect.width, rect.height);
+        (ctx as any).filter = 'none';
+        beamsRef.current.forEach((beam) => {
+          // shift beams a little for variation per resize
+          beam.y -= beam.speed * 20;
+          drawBeam(ctx, beam);
+        });
+      }
+    };
+    const updateCanvasSize = () => {
+      if (resizeRaf) cancelAnimationFrame(resizeRaf);
+      resizeRaf = requestAnimationFrame(doResize);
     };
 
     updateCanvasSize();
@@ -102,24 +141,77 @@ export function BeamsBackground({ className, intensity = "subtle", children }: B
       c.restore();
     }
 
-    function animate() {
+    function animate(now: number) {
+      // Frame throttle for non-Safari
+      if (now - lastFrameTime < FRAME_INTERVAL) {
+        animationFrameRef.current = requestAnimationFrame(animate);
+        return;
+      }
+      lastFrameTime = now;
       const rect = container.getBoundingClientRect();
       ctx.clearRect(0, 0, rect.width, rect.height);
-      ctx.filter = "blur(28px)";
+      // Apply blur only when supported; use lower blur on non-Safari for performance
+      if (currentBlurPx > 0) {
+        (ctx as any).filter = `blur(${currentBlurPx}px)`;
+      } else {
+        (ctx as any).filter = "none";
+      }
       beamsRef.current.forEach((beam) => {
         beam.y -= beam.speed;
         beam.pulse += beam.pulseSpeed;
         if (beam.y + beam.length < -100) resetBeam(beam);
         drawBeam(ctx, beam);
       });
+      // Adaptive degradation if FPS is low
+      frameCounter += 1;
+      accumTime += FRAME_INTERVAL;
+      if (frameCounter >= TARGET_FPS) { // roughly every second
+        // Estimate FPS from frame spacing
+        const estimatedFps = TARGET_FPS; // since we throttle, use TARGET_FPS as baseline
+        // If the browser can't keep up with the throttled target (jank observed), degrade
+        // We can't directly read jank here, but we can progressively reduce for Firefox/Chromium at lower levels
+        if (perfLevel === 2 && (isFirefox || !isSafari)) {
+          // First step: disable blur and trim beams by ~25%
+          currentBlurPx = 0;
+          const trimmed = Math.max(MIN_BEAMS, Math.floor(beamsRef.current.length * 0.75));
+          beamsRef.current = beamsRef.current.slice(0, trimmed);
+          perfLevel = 1;
+        } else if (perfLevel === 1 && (isFirefox || !isSafari)) {
+          // Second step: trim further to minimal visual load
+          const trimmed = Math.max(MIN_BEAMS, Math.floor(beamsRef.current.length * 0.66));
+          beamsRef.current = beamsRef.current.slice(0, trimmed);
+          perfLevel = 0;
+        }
+        frameCounter = 0;
+        accumTime = 0;
+      }
       animationFrameRef.current = requestAnimationFrame(animate);
     }
 
-    animate();
-    return () => {
-      ro.disconnect();
-      if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
-    };
+    if (!HEAVY_MODE) {
+      // Pause animation when tab is hidden to save resources
+      const handleVisibility = () => {
+        if (document.hidden) {
+          if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+        } else {
+          lastFrameTime = 0;
+          animationFrameRef.current = requestAnimationFrame(animate);
+        }
+      };
+      document.addEventListener('visibilitychange', handleVisibility);
+      animationFrameRef.current = requestAnimationFrame(animate);
+      return () => {
+        ro.disconnect();
+        document.removeEventListener('visibilitychange', handleVisibility);
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      };
+    } else {
+      // Heavy mode: static rendering only
+      return () => {
+        ro.disconnect();
+        if (animationFrameRef.current) cancelAnimationFrame(animationFrameRef.current);
+      };
+    }
   }, [intensity]);
 
   return (

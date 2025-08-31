@@ -9,6 +9,11 @@ export const Header: React.FC = () => {
   const location = useLocation();
   const logoSrc = `${import.meta.env.BASE_URL}pan_logo.svg`;
 
+  // Close mobile menu automatically on navigation
+  React.useEffect(() => {
+    if (isMenuOpen) setIsMenuOpen(false);
+  }, [location.pathname]);
+
   const menuItems = [
     { name: 'Startseite', href: '/' },
     { name: 'Über uns', href: '/about' },
@@ -32,6 +37,7 @@ export const Header: React.FC = () => {
       isBordered 
       isBlurred={false}
       className="bg-white shadow-sm"
+      isMenuOpen={isMenuOpen}
       onMenuOpenChange={setIsMenuOpen}
     >
       <NavbarContent>

@@ -7,8 +7,10 @@ import Wave from 'react-wavify';
 import heroImg from '../pictures/pan_hero.png';
 
 export const HeroSection: React.FC = () => {
+  const prefersReducedMotion = typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const pauseWave = prefersReducedMotion;
   return (
-    <section className="relative h-[100svh] md:h-[100vh] min-h-[820px] flex items-center justify-center overflow-hidden">
+    <section className="relative h-screen md:h-[100vh] lg:h-[100dvh] min-h-[820px] flex items-center justify-center overflow-hidden">
       {/* Background Image */}
       <div className="absolute inset-0 z-0">
         <img
@@ -75,11 +77,11 @@ export const HeroSection: React.FC = () => {
       <div className="wave-divider">
         <Wave
           fill="url(#oceanGradient)"
-          paused={false}
+          paused={pauseWave}
           options={{
             height: 42,
             amplitude: 24,
-            speed: 0.12,
+            speed: pauseWave ? 0 : 0.12,
             points: 3,
           }}
           style={{ display: 'block' }}
