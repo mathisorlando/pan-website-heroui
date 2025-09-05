@@ -1,13 +1,13 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { Navbar, NavbarBrand, NavbarContent, NavbarItem, Button, NavbarMenuToggle, NavbarMenu, NavbarMenuItem, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem } from "@heroui/react";
+import { Navbar, NavbarBrand, NavbarContent, NavbarItem, Button, NavbarMenuToggle, NavbarMenu, NavbarMenuItem, Dropdown, DropdownTrigger, DropdownMenu, DropdownItem, Badge, Avatar } from "@heroui/react";
 import { Icon } from '@iconify/react';
 
 export const Header: React.FC = () => {
   const [isMenuOpen, setIsMenuOpen] = React.useState(false);
   const [currentLanguage, setCurrentLanguage] = React.useState('DE');
   const location = useLocation();
-  const logoSrc = `${import.meta.env.BASE_URL}pan_logo.svg`;
+  const logoSrc = `/pan_logo.svg`;
 
   // Close mobile menu automatically on navigation
   React.useEffect(() => {
@@ -98,7 +98,7 @@ export const Header: React.FC = () => {
           <Button 
             as={Link} 
             to="/contact" 
-            color="accent" 
+            color="primary" 
             variant="solid" 
             radius="sm"
             className="font-medium"
@@ -125,7 +125,7 @@ export const Header: React.FC = () => {
           <Button 
             as={Link} 
             to="/contact" 
-            color="accent" 
+            color="primary" 
             variant="solid" 
             radius="sm"
             fullWidth
